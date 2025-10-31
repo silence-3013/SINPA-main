@@ -57,7 +57,7 @@ def get_public_config():
         "--wandb", type=str_to_bool, default=True, help="whether to use wandb"
     )
     parser.add_argument(
-        "--wandb_mode", type=str, default="online",
+        "--wandb_mode", type=str, default="offline",
         choices=["online","offline","disabled"], help="wandb mode"
     )
 
