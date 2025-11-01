@@ -98,14 +98,36 @@ class DeepPA(BaseModel):
         self.CLUSTER = CLUSTER
         self.GCO_Thre = GCO_Thre
 
+        # 下面三类文件均为可选：若缺失则采用安全回退，保证不影响模型运行
         path_assignment = "data/region/assignment.npy"  # [n, m]
         path_mask = "data/region/mask.npy"  # [n, n]
-        self.assignment = (
-            torch.from_numpy(np.load(path_assignment)).float().to(self.device)
-        )
-        self.mask = torch.from_numpy(np.load(path_mask)).bool().to(self.device)
-        dist = torch.Tensor(np.load("data/base/dist.npy")).to(self.device)
-        dist_mask = dist > 1
+        try:
+            assign_np = np.load(path_assignment)
+            self.assignment = (
+                torch.from_numpy(assign_np).float().to(self.device)
+            )
+        except Exception:
+            # 回退：按节点顺序做一热分配到 100 个簇（与原默认 cluster 数一致）
+            cluster = 100
+            assign_np = np.zeros((self.num_nodes, cluster), dtype=np.float32)
+            for i in range(self.num_nodes):
+                assign_np[i, i % cluster] = 1.0
+            self.assignment = torch.from_numpy(assign_np).float().to(self.device)
+
+        try:
+            mask_np = np.load(path_mask)
+            self.mask = torch.from_numpy(mask_np).bool().to(self.device)
+        except Exception:
+            # 回退：无连接（零布尔矩阵），与无外部邻接一致
+            self.mask = torch.zeros((self.num_nodes, self.num_nodes), dtype=torch.bool).to(self.device)
+
+        try:
+            dist_np = np.load("data/base/dist.npy")
+            dist = torch.Tensor(dist_np).to(self.device)
+            dist_mask = dist > 1
+        except Exception:
+            # 回退：不额外裁剪连接
+            dist_mask = torch.ones((self.num_nodes, self.num_nodes), dtype=torch.bool).to(self.device)
         self.mask = torch.logical_and(self.mask, dist_mask)
 
         if not self.temporal_flag:

@@ -1,7 +1,9 @@
 Summary for split='test'
-Generated at: 2025-10-31 13:13:19
+Generated at: 2025-11-01 12:45:42
 Logs root: C:\Users\silence\Desktop\study work\SINPA-main\logs
-Found files: 0, Parsed valid entries: 0
+Found files: 2, Parsed valid entries: 2
 
 Best (sorted by MAE then RMSE):
-No metrics files found. Run test to generate metrics_<split>_*.txt.
+dataset/model/folder | exp | horizon | avg_mae | avg_rmse | impl/adapt/alpha/tau/levels | file
+base/DeepPA/64-2-2-True-True-True-True-True-1.0-4-0.001-1-True-True-1 | 1 | 12 | 0.2884 | 0.3470 | wavelet/True/10.0/0.0/1 | base\DeepPA\64-2-2-True-True-True-True-True-1.0-4-0.001-1-True-True-1\metrics_test_1.txt
+base/DeepPA/64-2-2-True-True-True-True-True-1.0-4-0.001-2-True-True-1 | 2 | 12 | 0.2884 | 0.3470 | wavelet/True/10.0/0.0/1 | base\DeepPA\64-2-2-True-True-True-True-True-1.0-4-0.001-2-True-True-1\metrics_test_2.txt

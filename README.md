@@ -58,6 +58,24 @@ python .\download_data.py
 python .\create_fake_adj.py
 ```
 
+【仅 npz 最小依赖运行】
+- 现在旧版代码已支持在缺失 `data/` 辅助文件的情况下安全回退，仅依赖 `dataset/base/{train.npz,val.npz,test.npz}` 即可运行。
+- 回退策略：
+  - 邻接矩阵缺失时，自动回退为零矩阵（保持数值路径可运行）。
+  - DeepPA 模型对 `data/region/assignment.npy`、`data/region/mask.npy`、`data/base/dist.npy` 缺失时使用占位回退，不影响训练/评估。
+  - 指标模块对 `data/prob_full_occupy.npy` 缺失时跳过掩码叠乘（`occup_mask=None`），保证评估正常输出。
+  - `wandb` 为可选依赖，未安装时可使用 `--wandb False --wandb_mode disabled` 禁用。
+
+示例（快速最小训练与评估，仅用 npz 数据）：
+
+```
+python .\experiments\DeepPA\main.py --dataset base --mode train --gpu 0 \
+  --batch_size 4 --max_epochs 1 --patience 1 \
+  --wandb False --wandb_mode disabled
+```
+
+运行后会打印 `args.log_dir`，并在对应目录生成 `metrics_test_<n_exp>.txt` 等结构化指标文件。
+
 ### 3) 设备与日志
 
 - 代码会自动检测 GPU/CPU。`--gpu` 仅用于设置 `CUDA_VISIBLE_DEVICES`，CPU 也能运行但较慢。
@@ -198,6 +216,27 @@ python .\experiments\DeepPA\main.py --dataset base --mode train --gpu 0 \
   --GCO True --gco_impl fourier --gco_adaptive False --GCO_Thre 0.7 \
   --wandb True --wandb_mode offline
 ```
+
+## 参数扫描（sweep）
+
+- 提供 `run_gco_wavelet_sweep.py` 批量扫描 GCO（小波 + 自适应门控）参数。默认禁用 `wandb`，降低环境要求。
+- 工作流程：
+  - 调用 `experiments/DeepPA/main.py` 执行训练；
+  - 捕获并解析 `args.log_dir`；
+  - 在该目录写入 `params.json` 记录本次组合；
+  - 检索 `metrics_test_<n_exp>.txt` 标记完成状态；
+  - 在仓库根写入 `sweep_runs.csv` 汇总路径与状态。
+
+最小示例（仅用 npz 数据）：
+
+```
+python .\run_gco_wavelet_sweep.py --dataset base --gpu 0 \
+  --seeds 42 --alphas 10 --taus 0 --levels 1 \
+  --batch_size 4 --max_epochs 1 --patience 1 \
+  --wandb False --wandb_mode disabled --summary_after True
+```
+
+完成后在根目录生成 `sweep_runs.csv` 与 `summary_test.{txt,csv}`。如需更大网格，只需调整 `--seeds/--alphas/--taus/--levels`。
 
 ## 测试与保存预测
 

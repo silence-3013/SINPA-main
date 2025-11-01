@@ -19,7 +19,11 @@ from src.utils.metrics import masked_mae
 from src.base.sampler import RandomSampler, CutEdgeSampler
 
 import pandas as pd
-import wandb
+# Make Weights & Biases optional to avoid hard dependency in sweeps
+try:
+    import wandb  # type: ignore
+except Exception:
+    wandb = None
 
 
 class BaseTrainer:
@@ -94,14 +98,15 @@ class BaseTrainer:
 
         self._logger.info("the number of parameters: {}".format(self.num_param))
         if self._wandb_flag:
-            try:
-                if wandb_mode == "disabled":
-                    self._wandb_flag = False
-                else:
+            # Disable wandb if explicitly disabled or not available
+            if wandb_mode == "disabled" or wandb is None:
+                self._wandb_flag = False
+            else:
+                try:
                     wandb.init(project="DeepPA", mode=wandb_mode)
                     wandb.run.summary["Params"] = self.num_param
-            except Exception:
-                self._wandb_flag = False
+                except Exception:
+                    self._wandb_flag = False
 
         self._adj_mat = adj_mat
         self._filter_type = filter_type

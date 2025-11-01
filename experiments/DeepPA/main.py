@@ -42,17 +42,7 @@ def get_config():
     parser.add_argument("--spatial_encoding", type=str_to_bool, default=True, help="whether to use spatial encoding")
     parser.add_argument("--temporal_encoding", type=str_to_bool, default=True, help="whether to use temporal encoding")
     parser.add_argument("--temporal_PE", type=str_to_bool, default=True, help="whether to use temporal PE")
-    parser.add_argument("--GCO", type=str_to_bool, default=True, help="whether to use GCO")
-    parser.add_argument("--CLUSTER", type=str_to_bool, default=False, help="whether to use CLUSTER")
-    parser.add_argument("--GCO_Thre", type=float, default=1, help="The proportion of low frequency signals")
-    # GCO module improvements
-    parser.add_argument("--gco_impl", type=str, default="fourier", choices=["fourier", "wavelet"]) 
-    parser.add_argument("--gco_adaptive", type=str_to_bool, default=True)
-    parser.add_argument("--gco_alpha", type=float, default=10.0)
-    parser.add_argument("--gco_tau", type=float, default=0.0)
-    parser.add_argument("--gco_wavelet_levels", type=int, default=1)
-    parser.add_argument("--base_lr", type=float, default=1e-3)
-    parser.add_argument("--lr_decay_ratio", type=float, default=0.5)
+    # GCO、优化相关参数已在 get_public_config 中统一定义，避免重复添加导致 argparse 冲突
     args = parser.parse_args()
     args.steps = [10, 20, 30, 40]
     print(args)
@@ -90,7 +80,14 @@ def main():
     args, fname = get_config()
 
     device = check_device()
-    _, _, adj_mat = load_graph_data(args.graph_pkl)
+    # 加载邻接矩阵（如缺失则回退为零矩阵，保证仅依赖 npz 数据可运行）
+    try:
+        if os.path.exists(args.graph_pkl):
+            _, _, adj_mat = load_graph_data(args.graph_pkl)
+        else:
+            raise FileNotFoundError
+    except Exception:
+        adj_mat = np.zeros((args.num_nodes, args.num_nodes), dtype=np.float32)
 
     model = DeepPA(
         dropout=args.dropout,

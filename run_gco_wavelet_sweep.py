@@ -103,8 +103,9 @@ def main():
     parser.add_argument('--max_epochs', type=int, default=30)
     parser.add_argument('--patience', type=int, default=10)
     parser.add_argument('--n_exp_start', type=int, default=1)
-    parser.add_argument('--wandb', type=str, default='True', choices=['True', 'False'])
-    parser.add_argument('--wandb_mode', type=str, default='offline', choices=['offline', 'online', 'disabled'])
+    # Default to disabling wandb to minimize environment requirements
+    parser.add_argument('--wandb', type=str, default='False', choices=['True', 'False'])
+    parser.add_argument('--wandb_mode', type=str, default='disabled', choices=['offline', 'online', 'disabled'])
     parser.add_argument('--dry_run', type=str, default='False', choices=['True', 'False'])
     parser.add_argument('--summary_after', type=str, default='True', choices=['True', 'False'])
     args = parser.parse_args()

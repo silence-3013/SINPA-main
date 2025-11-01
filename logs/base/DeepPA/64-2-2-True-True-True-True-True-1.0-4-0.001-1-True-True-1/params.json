@@ -1,0 +1,15 @@
+{
+  "dataset": "base",
+  "n_exp": 1,
+  "seed": 42,
+  "gco_impl": "wavelet",
+  "gco_adaptive": true,
+  "gco_alpha": 10.0,
+  "gco_tau": 0.0,
+  "gco_wavelet_levels": 1,
+  "batch_size": 4,
+  "max_epochs": 1,
+  "patience": 1,
+  "wandb": false,
+  "wandb_mode": "disabled"
+}

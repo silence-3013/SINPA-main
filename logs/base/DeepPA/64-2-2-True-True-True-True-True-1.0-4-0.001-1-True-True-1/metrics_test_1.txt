@@ -1,0 +1,21 @@
+Split: test, Horizon: 12
+Average MAE: 0.2884, Average RMSE: 0.3470
+Params:
+impl=None, adaptive=None, alpha=None, tau=None, levels=None, GCO=True, GCO_Thre=1, depth=None, heads=None, mlp_dim=None, base_lr=0.001, max_epochs=1, patience=1, batch_size=4, n_exp=1, log_dir=None
+Per-horizon metrics:
+h=00  MAE: 0.2884, RMSE: 0.3474
+h=01  MAE: 0.2888, RMSE: 0.3489
+h=02  MAE: 0.3149, RMSE: 0.3859
+h=03  MAE: 0.2671, RMSE: 0.3184
+h=04  MAE: 0.3638, RMSE: 0.4443
+h=05  MAE: 0.2737, RMSE: 0.3266
+h=06  MAE: 0.2659, RMSE: 0.3176
+h=07  MAE: 0.2828, RMSE: 0.3370
+h=08  MAE: 0.2661, RMSE: 0.3160
+h=09  MAE: 0.2667, RMSE: 0.3175
+h=10  MAE: 0.2837, RMSE: 0.3408
+h=11  MAE: 0.2986, RMSE: 0.3632
+Windows (0-3, 4-7, 8-11):
+0-3 MAE: 0.2898, RMSE: 0.3509
+4-7 MAE: 0.2965, RMSE: 0.3600
+8-11 MAE: 0.2788, RMSE: 0.3349

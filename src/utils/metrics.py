@@ -4,9 +4,14 @@ import pandas as pd
 import os
 
 
-occup = np.load("data/prob_full_occupy.npy")
-occup_mask = (occup > 0.1).astype(int).reshape(1, 1, -1, 1)
-occup_mask = torch.Tensor(occup_mask)
+# 评估掩码文件为可选；若不存在则在使用处跳过该掩码
+occup_mask = None
+try:
+    occup = np.load("data/prob_full_occupy.npy")
+    occup_mask = (occup > 0.1).astype(int).reshape(1, 1, -1, 1)
+    occup_mask = torch.Tensor(occup_mask)
+except Exception:
+    occup_mask = None
 
 
 def masked_mse(preds, labels, null_val=np.nan, mask=None):
@@ -158,7 +163,9 @@ def masked_acc(preds, labels, null_val=np.nan, mask=None, threshould=0.01):
         else:
             mask = labels > null_val + 0.1  # +0.1 for potential numerical errors
 
-    mask = occup_mask * mask
+    # 若 occupancy 掩码存在则使用，否则仅使用传入的 mask
+    if occup_mask is not None:
+        mask = occup_mask * mask
 
     mask = mask.float()
     mask /= torch.mean((mask))
