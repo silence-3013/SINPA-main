@@ -1,0 +1,7 @@
+Summary for split='test'
+Generated at: 2025-10-31 13:13:19
+Logs root: C:\Users\silence\Desktop\study work\SINPA-main\logs
+Found files: 0, Parsed valid entries: 0
+
+Best (sorted by MAE then RMSE):
+No metrics files found. Run test to generate metrics_<split>_*.txt.

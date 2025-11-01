@@ -1,6 +1,8 @@
 import logging
 import os
 import time
+import json
+from datetime import datetime
 from typing import Optional, List, Union
 
 import numpy as np
@@ -225,7 +227,6 @@ class BaseTrainer:
         return None
 
     def train_batch(self, X, label, iter):
-        print("【断点】train_batch 输入 X.shape:", X.shape, "label.shape:", label.shape)  # 中文注释：每个batch输入
         if self._aug < 1:
             new_adj = self._sampler.sample(self._aug)
             supports = self._calculate_supports(new_adj, self._filter_type)
@@ -233,7 +234,6 @@ class BaseTrainer:
             supports = self.supports
         self.optimizer.zero_grad()
         pred = self.model(X, supports)
-        print("【断点】模型输出 pred.shape:", pred.shape)  # 中文注释：模型输出
         pred, label = self._inverse_transform([pred, label])
 
         loss = self.loss_fn(pred, label, self.nan_val)
@@ -242,17 +242,14 @@ class BaseTrainer:
             self.model.parameters(), max_norm=self._clip_grad_value
         )
         self.optimizer.step()
-        print("【断点】本batch loss:", loss.item())  # 中文注释：损失
         return loss.item()
 
     def train(self):
-        print("【断点】开始训练")  # 中文注释：训练入口
         # training phase
         iter = 0
         val_losses = [np.inf]
         saved_epoch = -1
         for epoch in range(self._max_epochs):
-            print(f"【断点】Epoch {epoch} 开始")  # 中文注释：每个epoch
             self.model.train()
             train_losses = []
             if epoch - saved_epoch > self._patience:
@@ -264,7 +261,6 @@ class BaseTrainer:
 
             start_time = time.time()
             for i, (X, label) in enumerate(self.data["train_loader"]):
-                print(f"【断点】Epoch {epoch} Batch {i} 加载数据")  # 中文注释：每个batch
                 X, label = self._check_device([X, label])
                 train_losses.append(self.train_batch(X, label, iter))
                 iter += 1
@@ -352,14 +348,11 @@ class BaseTrainer:
         return mae
 
     def test_batch(self, X, label):
-        print("【断点】test_batch 输入 X.shape:", X.shape, "label.shape:", label.shape)  # 中文注释：测试batch输入
         pred = self.model(X, self.supports)
-        print("【断点】test_batch 输出 pred.shape:", pred.shape)  # 中文注释：测试batch输出
         pred, label = self._inverse_transform([pred, label])
         return pred, label
 
     def test(self, epoch, mode="test"):
-        print(f"【断点】开始测试，模式：{mode}")  # 中文注释：测试入口
         self.load_model(epoch, self.save_path, self._n_exp)
 
         labels = []
@@ -367,7 +360,6 @@ class BaseTrainer:
         with torch.no_grad():
             self.model.eval()
             for _, (X, label) in enumerate(self.data[mode + "_loader"]):
-                print("【断点】测试集 batch 输入 X.shape:", X.shape, "label.shape:", label.shape)  # 中文注释：测试集batch
                 X, label = self._check_device([X, label])
                 pred, label = self.test_batch(X, label)
                 labels.append(label.cpu())
@@ -417,6 +409,138 @@ class BaseTrainer:
             print(log.format(amae_day[1], armse_day[1]))
             log = "8-11 (3h) Test MAE: {:.4f}, Test RMSE: {:.4f}"
             print(log.format(amae_day[2], armse_day[2]))
+
+        # Write structured metrics to files for easier understanding
+        try:
+            avg_mae = float(np.mean(amae))
+            avg_rmse = float(np.mean(armse))
+            per_horizon = [
+                {"h": int(i), "mae": float(amae[i]), "rmse": float(armse[i])}
+                for i in range(self.model.horizon)
+            ]
+
+            # collect params for easier cross-experiment comparison
+            # try to infer batch_size from loaders
+            bs = None
+            try:
+                if isinstance(self.data, dict):
+                    for k in ("train_loader", "val_loader", "test_loader"):
+                        ld = self.data.get(k)
+                        if ld is not None and hasattr(ld, "batch_size"):
+                            bs = ld.batch_size
+                            break
+            except Exception:
+                bs = None
+
+            params = {
+                "dataset": getattr(self.model, "dataset", None),
+                "gco_impl": getattr(self.model, "gco_impl", None),
+                "gco_adaptive": getattr(self.model, "gco_adaptive", None),
+                "gco_alpha": getattr(self.model, "gco_alpha", None),
+                "gco_tau": getattr(self.model, "gco_tau", None),
+                "gco_wavelet_levels": getattr(self.model, "gco_wavelet_levels", None),
+                "GCO": getattr(self.model, "GCO", None),
+                "GCO_Thre": getattr(self.model, "GCO_Thre", None),
+                "depth": getattr(self.model, "depth", None),
+                "heads": getattr(self.model, "heads", None),
+                "mlp_dim": getattr(self.model, "mlp_dim", None),
+                "base_lr": getattr(self, "_base_lr", None),
+                "max_epochs": getattr(self, "_max_epochs", None),
+                "patience": getattr(self, "_patience", None),
+                "batch_size": bs,
+                "n_exp": getattr(self, "_n_exp", None),
+                "log_dir": getattr(self, "_log_dir", None),
+            }
+
+            summary = {
+                "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "split": mode,
+                "horizon": int(self.model.horizon),
+                "average": {"mae": avg_mae, "rmse": avg_rmse},
+                "per_horizon": per_horizon,
+                "params": params,
+            }
+            if self.model.horizon == 12:
+                summary["windows"] = {
+                    "0-3": {"mae": float(amae_day[0]), "rmse": float(armse_day[0])},
+                    "4-7": {"mae": float(amae_day[1]), "rmse": float(armse_day[1])},
+                    "8-11": {"mae": float(amae_day[2]), "rmse": float(armse_day[2])},
+                }
+
+            json_path = os.path.join(self.save_path, f"metrics_{mode}_{self._n_exp}.json")
+            with open(json_path, "w", encoding="utf-8") as f:
+                json.dump(summary, f, ensure_ascii=False, indent=2)
+
+            txt_path = os.path.join(self.save_path, f"metrics_{mode}_{self._n_exp}.txt")
+            with open(txt_path, "w", encoding="utf-8") as f:
+                f.write(f"Split: {mode}, Horizon: {self.model.horizon}\n")
+                f.write(f"Average MAE: {avg_mae:.4f}, Average RMSE: {avg_rmse:.4f}\n")
+                # write params block for convenience
+                f.write("Params:\n")
+                f.write(
+                    "impl={impl}, adaptive={adapt}, alpha={alpha}, tau={tau}, levels={levels}, "
+                    "GCO={gco}, GCO_Thre={gco_thre}, depth={depth}, heads={heads}, mlp_dim={mlp}, "
+                    "base_lr={base_lr}, max_epochs={max_epochs}, patience={patience}, batch_size={bs}, "
+                    "n_exp={n_exp}, log_dir={log_dir}\n".format(
+                        impl=params.get("gco_impl"),
+                        adapt=params.get("gco_adaptive"),
+                        alpha=params.get("gco_alpha"),
+                        tau=params.get("gco_tau"),
+                        levels=params.get("gco_wavelet_levels"),
+                        gco=params.get("GCO"),
+                        gco_thre=params.get("GCO_Thre"),
+                        depth=params.get("depth"),
+                        heads=params.get("heads"),
+                        mlp=params.get("mlp_dim"),
+                        base_lr=params.get("base_lr"),
+                        max_epochs=params.get("max_epochs"),
+                        patience=params.get("patience"),
+                        bs=params.get("batch_size"),
+                        n_exp=params.get("n_exp"),
+                        log_dir=params.get("log_dir"),
+                    )
+                )
+                f.write("Per-horizon metrics:\n")
+                for item in per_horizon:
+                    f.write(f"h={item['h']:02d}  MAE: {item['mae']:.4f}, RMSE: {item['rmse']:.4f}\n")
+                if self.model.horizon == 12:
+                    f.write("Windows (0-3, 4-7, 8-11):\n")
+                    f.write(f"0-3 MAE: {amae_day[0]:.4f}, RMSE: {armse_day[0]:.4f}\n")
+                    f.write(f"4-7 MAE: {amae_day[1]:.4f}, RMSE: {armse_day[1]:.4f}\n")
+                    f.write(f"8-11 MAE: {amae_day[2]:.4f}, RMSE: {armse_day[2]:.4f}\n")
+
+            csv_path = os.path.join(self.save_path, f"metrics_{mode}_{self._n_exp}.csv")
+            with open(csv_path, "w", encoding="utf-8") as f:
+                # comment header with params for easy inspection; pandas can read with comment="#"
+                f.write(f"# Split: {mode}, Horizon: {self.model.horizon}\n")
+                f.write(
+                    "# Params: impl={impl}, adaptive={adapt}, alpha={alpha}, tau={tau}, levels={levels}, "
+                    "GCO={gco}, GCO_Thre={gco_thre}, depth={depth}, heads={heads}, mlp_dim={mlp}, "
+                    "base_lr={base_lr}, max_epochs={max_epochs}, patience={patience}, batch_size={bs}, "
+                    "n_exp={n_exp}, log_dir={log_dir}\n".format(
+                        impl=params.get("gco_impl"),
+                        adapt=params.get("gco_adaptive"),
+                        alpha=params.get("gco_alpha"),
+                        tau=params.get("gco_tau"),
+                        levels=params.get("gco_wavelet_levels"),
+                        gco=params.get("GCO"),
+                        gco_thre=params.get("GCO_Thre"),
+                        depth=params.get("depth"),
+                        heads=params.get("heads"),
+                        mlp=params.get("mlp_dim"),
+                        base_lr=params.get("base_lr"),
+                        max_epochs=params.get("max_epochs"),
+                        patience=params.get("patience"),
+                        bs=params.get("batch_size"),
+                        n_exp=params.get("n_exp"),
+                        log_dir=params.get("log_dir"),
+                    )
+                )
+                f.write("h,mae,rmse\n")
+                for item in per_horizon:
+                    f.write(f"{item['h']},{item['mae']:.4f},{item['rmse']:.4f}\n")
+        except Exception as e:
+            self._logger.info(f"Failed to write structured metrics: {e}")
 
         results = np.stack([amae, armse], axis=0)
         np.savetxt(

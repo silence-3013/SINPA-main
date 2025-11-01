@@ -132,7 +132,6 @@ class DeepPA(BaseModel):
 
         for _ in range(n_blocks):
             window_size = self.seq_len
-            print("ws=", window_size)
             if self.temporal_flag:
                 self.t_modules.append(
                     TemporalTransformer(
@@ -198,64 +197,37 @@ class DeepPA(BaseModel):
         )
 
     def forward(self, X, supports=None):
-        print("==== DeepPA forward ====")
-        print("Input X.shape:", X.shape)  # [b, t, n, input_dim]
-
         x_embed = self.embed(X[..., 1:].long())
-        print("x_embed.shape:", x_embed.shape)  # [b, t, n, embed_dim]
 
         X = torch.cat((X[..., 0:1], x_embed), -1)
-        print("After concat, X.shape:", X.shape)
-
         X = X[..., 0:1]
-        print("After keep only target, X.shape:", X.shape)
 
         covars = x_embed[:, :, 0, :-9]
-        print("covars.shape:", covars.shape)
-
         semantic = x_embed[0, 0, :, -9:]
-        print("semantic.shape:", semantic.shape)
 
         B, T, N, C = X.shape
         x = X.permute(0, 3, 2, 1)
-        print("After permute, x.shape:", x.shape)
 
         x = self.start_conv(x)
-        print("After start_conv, x.shape:", x.shape)
-
         covars = self.covar_linear(covars).unsqueeze(2).permute(0, 3, 2, 1)
-        print("After covar_linear, covars.shape:", covars.shape)
 
         for i in range(self.n_blocks):
             if self.spatial_flag:
                 x, covars = self.s_modules[i](x, supports[0], semantic, covars)
-                print(f"Block {i} after spatial, x.shape: {x.shape}, covars.shape: {covars.shape}, N(after spatial)={x.shape[2]}")  # 追踪N的变化
             else:
                 x = self.spatial_convs[i](x)
 
             if self.temporal_flag:
                 x, covars = self.t_modules[i](x, covars)
-                print(f"Block {i} after temporal, x.shape: {x.shape}, covars.shape: {covars.shape}, N(after temporal)={x.shape[2]}")  # 追踪N的变化
             else:
                 x = self.temporal_convs[i](x)
 
         x_hat = F.relu(self.end_conv_1(x[..., -1:]))
-        print("After end_conv_1, x_hat.shape:", x_hat.shape)
-
-        print("Before end_conv_2, x_hat.shape:", x_hat.shape)
         x_hat = self.end_conv_2(x_hat)
-        print("After end_conv_2, x_hat.shape:", x_hat.shape)
-        print("Target shape: B={}, horizon={}, output_dim={}, N={}".format(B, self.horizon, self.output_dim, N))
-        print("Product:", B * self.horizon * self.output_dim * N)
-        print("x_hat.numel():", x_hat.numel())
         N_actual = x_hat.shape[-2]
-        print("实际用于reshape的N:", N_actual)
         x_hat = x_hat.reshape(B, self.horizon, self.output_dim, N_actual)
-        print("After end_conv_2 and reshape, x_hat.shape:", x_hat.shape)
-
         x_hat = x_hat.permute(0, 1, 3, 2)
-        print("Final output x_hat.shape:", x_hat.shape)
-        print("========================")
+
         return x_hat
 
 
@@ -351,10 +323,7 @@ class FeedForward(nn.Module):
             torch.Tensor: The output tensor.
 
         """
-        print("[FeedForward] 输入 x.shape:", x.shape)  # 中文注释：前馈网络输入形状
-        out = self.net(x)
-        print("[FeedForward] 输出 x.shape:", out.shape)  # 中文注释：前馈网络输出形状
-        return out
+        return self.net(x)
 
 
 class GCO_Module(nn.Module):
@@ -414,7 +383,6 @@ class GCO_Module(nn.Module):
         return x[:, :original_length, :]
 
     def forward(self, x):
-        print("【断点】GCO输入形状：", x.shape)
         bias = x
         dtype = x.dtype
         x = x.to(torch.float32)
@@ -553,4 +521,222 @@ class SpatialTransformer(nn.Module):
                            alpha=self.gco_alpha, tau=self.gco_tau, wavelet_levels=self.gco_wavelet_levels),
                 PreNorm(dim, FeedForward(dim, mlp_dim, dropout=dropout)),
             ]))
-        # ... existing code ...
+
+    def forward(self, x, adj, semantic, covars=None):
+        """
+        Forward pass of the SpatialTransformer module.
+
+        Args:
+            x (torch.Tensor): Input tensor of shape [b, c, n, t].
+            adj: Adjacency matrix.
+            semantic (torch.Tensor): Semantic tensor of shape [n, 10].
+            covars (torch.Tensor, optional): Covariate tensor of shape [b, c, 1, t]. Defaults to None.
+
+        Returns:
+            torch.Tensor: Output tensor of shape [b, c, n+1 or n, t] if temporal encoding is used, otherwise [b, c, n, t].
+            torch.Tensor: Covariate tensor of shape [b, c, 1, t] if temporal encoding is used, otherwise None.
+        """
+        b, c, n, t = x.shape
+        x = x.permute(0, 3, 2, 1).reshape(b * t, n, c)
+        covars_tmp = covars.permute(0, 3, 2, 1).reshape(b * t, 1, c)
+
+        if self.spatial_encoding:
+            x = x + torch.cat(
+                [self.pos_embedding, self.sematic_to_embedding(semantic)], dim=-1
+            )
+
+        if self.temporal_encoding:
+            x = torch.cat([covars_tmp, x], dim=1)
+            n = n + 1
+        else:
+            n = n
+
+        for gco, ff in self.layers:
+            if self.GCO:
+                x = gco(x) + x
+            x = ff(x) + x
+
+        x = x.reshape(b, t, n, c).permute(0, 3, 2, 1)
+        if self.temporal_encoding:
+            return x[:, :, 1:, :], x[:, :, :1, :]
+        else:
+            return x, covars
+
+
+class TemporalAttention(nn.Module):
+    """
+    Temporal Attention module that applies self-attention mechanism over the temporal dimension of the input.
+
+    Args:
+        dim (int): The input feature dimension.
+        heads (int, optional): The number of attention heads. Defaults to 2.
+        window_size (int, optional): The size of the attention window. Defaults to 1.
+        qkv_bias (bool, optional): Whether to include bias terms in the query, key, and value linear layers. Defaults to False.
+        qk_scale (float, optional): Scale factor for the query and key. Defaults to None.
+        dropout (float, optional): Dropout rate. Defaults to 0.0.
+        causal (bool, optional): Whether to apply causal masking to the attention weights. Defaults to True.
+        device (torch.device, optional): The device on which the module is located. Defaults to None.
+
+    Attributes:
+        dim (int): The input feature dimension.
+        num_heads (int): The number of attention heads.
+        causal (bool): Whether to apply causal masking to the attention weights.
+        window_size (int): The size of the attention window.
+        scale (float): Scale factor for the query and key.
+        qkv (nn.Linear): Linear layer for the query, key, and value projection.
+        attn_drop (nn.Dropout): Dropout layer for attention weights.
+        proj (nn.Linear): Linear layer for the output projection.
+        proj_drop (nn.Dropout): Dropout layer for the output.
+
+    Methods:
+        forward(x): Performs a forward pass of the TemporalAttention module.
+
+    """
+
+    def __init__(
+        self,
+        dim,
+        heads=2,
+        window_size=1,
+        qkv_bias=False,
+        qk_scale=None,
+        dropout=0.0,
+        causal=True,
+        device=None,
+    ):
+        super().__init__()
+        assert dim % heads == 0, f"dim {dim} should be divided by num_heads {heads}."
+
+        self.dim = dim
+        self.num_heads = heads
+        self.causal = causal
+        self.window_size = window_size
+        head_dim = dim // heads
+        self.scale = qk_scale or head_dim**-0.5
+
+        self.qkv = nn.Linear(dim, dim * 3, bias=qkv_bias)
+
+        self.attn_drop = nn.Dropout(dropout)
+        self.proj = nn.Linear(dim, dim)
+        self.proj_drop = nn.Dropout(dropout)
+
+        self.mask = torch.tril(torch.ones(window_size, window_size)).to(device)
+
+    def forward(self, x):
+        """
+        Performs a forward pass of the TemporalAttention module.
+
+        Args:
+            x (torch.Tensor): The input tensor of shape (B, T, C), where B is the batch size, T is the sequence length, and C is the input feature dimension.
+
+        Returns:
+            torch.Tensor: The output tensor of shape (B, T, C), where B is the batch size, T is the sequence length, and C is the output feature dimension.
+
+        """
+        B_prev, T_prev, C_prev = x.shape
+        if self.window_size > 0:
+            x = x.reshape(-1, self.window_size, C_prev)
+        B, T, C = x.shape
+
+        qkv = (
+            self.qkv(x)
+            .reshape(B, -1, 3, self.num_heads, C // self.num_heads)
+            .permute(2, 0, 3, 1, 4)
+        )
+        q, k, v = qkv[0], qkv[1], qkv[2]
+
+        # merge key padding and attention masks
+        attn = (q @ k.transpose(-2, -1)) * self.scale  # [b, heads, T, T]
+
+        if self.causal:
+            attn = attn.masked_fill_(self.mask == 0, float("-inf"))
+
+        x = (attn.softmax(dim=-1) @ v).transpose(1, 2).reshape(B, T, C)
+
+        x = self.proj(x)
+        x = self.proj_drop(x)
+
+        if self.window_size > 0:
+            x = x.reshape(B_prev, T_prev, C_prev)
+        return x
+
+
+class TemporalTransformer(nn.Module):
+    """
+    TemporalTransformer module that applies temporal attention and feed-forward layers.
+
+    Args:
+        temporal_PE (bool): Whether to use temporal positional encoding.
+        dim (int): Dimension of the input tensor.
+        depth (int): Number of layers in the transformer.
+        heads (int): Number of attention heads.
+        window_size (int): Size of the attention window.
+        mlp_dim (int): Dimension of the feed-forward layer.
+        num_time (int): Number of time steps.
+        dropout (float, optional): Dropout rate. Defaults to 0.0.
+        device (str, optional): Device to run the module on. Defaults to None.
+        covar_dim (int, optional): Dimension of the covariate tensor. Defaults to 10.
+    """
+
+    def __init__(
+        self,
+        temporal_PE,
+        dim,
+        depth,
+        heads,
+        window_size,
+        mlp_dim,
+        num_time,
+        dropout=0.0,
+        device=None,
+        covar_dim=10,
+    ):
+        super().__init__()
+        self.temporal_PE = temporal_PE
+        if temporal_PE:
+            self.pos_embedding = nn.Parameter(torch.randn(num_time, dim))
+
+        self.layers = nn.ModuleList([])
+        for i in range(depth):
+            self.layers.append(
+                nn.ModuleList(
+                    [
+                        TemporalAttention(
+                            dim=dim,
+                            heads=heads,
+                            window_size=window_size,
+                            dropout=dropout,
+                            device=device,
+                        ),
+                        PreNorm(dim, FeedForward(dim, mlp_dim, dropout=dropout)),
+                    ]
+                )
+            )
+
+    def forward(self, x, covars):
+        """
+        Forward pass of the TemporalTransformer module.
+
+        Args:
+            x (torch.Tensor): Input tensor of shape [b, c, n, t].
+            covars (torch.Tensor): Covariate tensor of shape [b, c, 1, t].
+
+        Returns:
+            torch.Tensor: Transformed tensor of shape [b, c, n, t].
+            torch.Tensor: Covariate tensor of shape [b, c, 1, t].
+        """
+        b, c, n, t = x.shape
+        x = x.permute(0, 2, 3, 1).reshape(b * n, t, c)  # [b*n, t, c]
+        if self.temporal_PE:
+            x = x + self.pos_embedding  # [b*n, t, c]
+
+        covars = covars.permute(0, 2, 3, 1).reshape(b, t, c)  # [b, t, c]
+        x = torch.cat([covars, x], dim=0)  # [b+b*n, t, c]
+
+        for attn, ff in self.layers:
+            x = attn(x) + x
+            x = ff(x) + x
+
+        covars = x[:b].reshape(b, 1, t, c).permute(0, 3, 1, 2)  # [b, c, 1, t]
+        x = x[b:].reshape(b, n, t, c).permute(0, 3, 1, 2)  # [b, c, n, t]
+        return x, covars

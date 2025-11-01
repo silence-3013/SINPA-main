@@ -62,6 +62,14 @@ python .\create_fake_adj.py
 
 - 代码会自动检测 GPU/CPU。`--gpu` 仅用于设置 `CUDA_VISIBLE_DEVICES`，CPU 也能运行但较慢。
 - 日志与模型输出位于：`logs/<dataset>/<model_name>/<auto-folder>/`。
+- 输出文件格式优化：测试/评估阶段将额外生成以下结构化文件，便于人读与脚本解析：
+  - `metrics_<split>_<n>.txt`：人类可读摘要（平均 MAE/RMSE、逐步指标、若 `horizon=12` 还含 0-3/4-7/8-11 三段窗口汇总）。
+    - 同时包含 `Params:` 区块，列出核心实验参数（如 `gco_impl/adaptive/alpha/tau/levels`、`base_lr/max_epochs/patience/batch_size` 等）。
+  - `metrics_<split>_<n>.json`：同上内容的 JSON 结构（含时间戳与逐步指标列表）。
+    - 扩展字段 `params`：包含本次实验的关键参数，便于程序化汇总与对比。
+  - `metrics_<split>_<n>.csv`：带表头的逐步指标表（列：`h, mae, rmse`）。
+    - 顶部含注释行写入参数信息（`# Params: ...`）。如用 pandas 读取，请使用 `pd.read_csv(path, comment='#')`。
+  - 保留原有 `results_<n>.csv`（两行，分别为各步 MAE、RMSE），以向后兼容旧脚本。
 
 ## 数据集简介
 我们从 [Data.gov.sg](https://data.gov.sg/) 爬取了三年、每 5 分钟的实时 PA 数据，覆盖 1,921 个停车场。为减轻缺失值影响，我们将原始数据重采样为 15 分钟，并选取缺失率 <30% 的停车场。考虑时间分布漂移，仅使用 2020/07/01 – 2021/06/30 的一年数据，训练/验证/测试比例为 10:1:1。我们同时移除 KL 散度较高的停车场样本，最终保留 1,687 个分布相对稳定的停车场。此外，我们整合了气象、规划区、利用类型、路网等外部属性，来源包括 [Data.gov.sg](https://data.gov.sg/)、[URA](https://www.ura.gov.sg/)、[LTA](https://datamall.lta.gov.sg/content/datamall/en.html)。
@@ -212,6 +220,19 @@ python .\experiments\DeepPA\main.py --dataset base --mode test --gpu 0 \
 - 模型：`logs/base/DeepPA/<自动文件夹>/final_model_<n_exp>.pt`
 - 验证与测试指标：终端打印，平均 MAE/RMSE 写入 `results_<n_exp>.csv`
 - 预测保存：`train_preds.npy / val_preds.npy / test_preds.npy`（对应标签文件亦保存）
+ - 结构化指标：`metrics_<split>_<n_exp>.{txt,json,csv}`，更易读与后续分析（新增）。
+ - 汇总到根目录：使用一键脚本将 `metrics_test_*.txt` 汇总到 `summary_test.txt`（新增）。
+
+一键汇总（可选）：
+
+```
+python .\collect_metrics_summary.py --split test
+```
+
+- 可选参数：
+  - 指定日志根目录：`--logs_root .\logs`
+  - 指定输出文件：`--output .\my_summary_test.txt`
+- 汇总内容：递归搜集 `logs/<dataset>/<model>/<auto-folder>/metrics_test_<n>.txt`，解析平均 MAE/RMSE、horizon 与文件相对路径，按 MAE→RMSE 排序输出。
 
 ## 新增/关键参数释义（GCO 改进）
 
@@ -227,6 +248,21 @@ python .\experiments\DeepPA\main.py --dataset base --mode test --gpu 0 \
 - `--max_epochs`（默认 100）与 `--patience`（默认 10，早停）
 - `--wandb` 与 `--wandb_mode`（如不使用请设为 `--wandb False --wandb_mode disabled`）
  - `--wandb` 与 `--wandb_mode`（推荐使用 `--wandb True --wandb_mode offline` 以离线记录）
+
+### 批量参数扫面（小波 + 自适应门控）
+
+- 一键扫面并自动汇总：
+
+```
+python .\run_gco_wavelet_sweep.py --alphas 5,10,20 --taus -0.5,0.0,0.5 \
+  --levels 1 --seeds 42 --max_epochs 30 --patience 10 --gpu 0
+```
+
+- 说明：
+  - 默认以 `wavelet + adaptive` 运行，逐格遍历 `alpha/tau/levels/seeds`，训练结束后写入 `params.json` 到对应日志目录，并生成根目录的 `summary_test.txt`（显示 impl/adapt/alpha/tau/levels）。
+  - 汇总脚本支持导出结构化文件：`summary_<split>.csv`（包含指标与参数列）与 `summary_<split>.json`（条目列表，含 `params`）。
+  - 查看命令但不执行：`--dry_run True`；仅在扫面完成后生成汇总：`--summary_after True`（默认开启）。
+  - 运行时间较长，建议先用较小网格或降低 `--max_epochs`、提高早停（`--patience`）加速试验。
 
 ## 实验配置（原论文）与复现建议
 

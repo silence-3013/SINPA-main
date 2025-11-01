@@ -33,7 +33,6 @@ class Dataset(torch.utils.data.Dataset):
         return len(self.data)
 
     def __getitem__(self, idx):
-        print("【断点】Dataset 取样本 idx:", idx)  # 中文注释：数据集getitem
         if torch.is_tensor(idx):
             idx = idx.tolist()
         samplePath = self.rootDir + "/" + self.data["sample_path"][idx]
@@ -44,7 +43,6 @@ class Dataset(torch.utils.data.Dataset):
         for i in range(self.output_dim):
             sample[..., i] = self.scalers[i].transform(sample[..., i])
             label[..., i] = self.scalers[i].transform(label[..., i])
-        print("【断点】返回 sample.shape:", sample.shape, "label.shape:", label.shape)  # 中文注释：样本shape
         return Tensor(sample), Tensor(label)
 
 

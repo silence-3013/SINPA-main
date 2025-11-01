@@ -87,14 +87,10 @@ def get_config():
 
 
 def main():
-    print("【断点】程序启动，准备获取配置参数")  # 中文注释：主流程入口
     args, fname = get_config()
-    print("【断点】配置参数：", args)  # 中文注释：打印所有参数
 
     device = check_device()
-    print("【断点】使用设备：", device)  # 中文注释：设备信息
     _, _, adj_mat = load_graph_data(args.graph_pkl)
-    print("【断点】图结构加载完成")  # 中文注释：图结构
 
     model = DeepPA(
         dropout=args.dropout,
@@ -123,10 +119,8 @@ def main():
         gco_tau=args.gco_tau,
         gco_wavelet_levels=args.gco_wavelet_levels,
     )
-    print("【断点】DeepPA模型创建完成")  # 中文注释：模型初始化
 
     data = get_dataloader(args.datapath, args.batch_size, args.output_dim)
-    print("【断点】数据加载器创建完成，keys:", data.keys())  # 中文注释：dataloader信息
 
     trainer = DeepPA_Trainer(
         model=model,
@@ -147,17 +141,13 @@ def main():
         patience=args.patience,
         device=device,
     )
-    print("【断点】Trainer创建完成")  # 中文注释：Trainer初始化
 
     if args.mode == "train":
-        print("【断点】进入训练模式")  # 中文注释：训练模式
         trainer.train()
         trainer.test(-1, "test")
     else:
-        print("【断点】进入测试模式")  # 中文注释：测试模式
         trainer.test(-1, args.mode)
         if args.save_preds:
-            print("【断点】保存预测结果")  # 中文注释：保存预测
             trainer.save_preds(-1)
 
 
